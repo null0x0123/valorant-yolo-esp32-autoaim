@@ -1,0 +1,12 @@
+#模型训练配置文件
+
+#数据集路径
+path: "E:/桌面/bvn"
+train: images/train
+val: images/val
+test: 
+
+#数据集标注类别
+names:
+  0: target
+  1: head
