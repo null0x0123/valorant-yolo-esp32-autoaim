@@ -1,5 +1,5 @@
-#V2pro模板
-#模型训练含头部与身体
+#V1模板
+#删除了微调逻辑和预测逻辑
 import serial
 import time
 import dxcam
@@ -12,8 +12,8 @@ from ultralytics import YOLO
 
 ############                    定位速度speed                           ############
 speed = 2
-############                    预测强度predict                         ############
-predict = 0
+############                    屏幕大小                                ############
+size_x,size_y = 2560,1440
 ############                    矩形自瞄范围 x * y                      ############
 area_x,area_y = 320,320
 ############                    模型置信度                              ############
@@ -22,11 +22,6 @@ conf = 0.75
 classes_list = [1]
 ############                    模型选择                                ############
 model = r"D:\code\python\ultralytics-main\perfect.engine"
-############                    锁歪了可以自定义参数                     ############
-############                    左右调整(正值向右)                       ############
-move_X = 0
-############                    上下调整(正值向上)                       ############
-move_Y = 0
 
 
 
@@ -34,13 +29,11 @@ move_Y = 0
 #初始化
 
 #屏幕中心坐标
-ox,oy = 1280,720
+ox,oy = size_x // 2,size_y // 2
 
 #模型初始化
 yolo = YOLO(model = model,task = "detect")
 
-#旧目标坐标初始化
-last_x,last_y = 0,0
 
 #截图范围初始化
 left = ox - area_x // 2
@@ -83,6 +76,7 @@ while True:
 
     #空帧拦截防止崩溃
     if frame_BGR is None:
+        time.sleep(0.001)
         continue
 
 
@@ -149,21 +143,8 @@ while True:
 
         
 
-        #  **预测逻辑**
-        #计算预测位置
-        #两帧的位移
-        vel_x,vel_y = dx - last_x,dy - last_y
-        #预测的坐标
-        pred_x,pred_y = dx + vel_x * predict,dy + vel_y * predict
-
-        #刷新旧目标位置
-        last_x,last_y = dx,dy
-
-        
-
         #计算相对位移
-        
-        e_x,e_y = int((pred_x + (move_X) - ox) * speed),int((pred_y - (move_Y) - oy) * speed)
+        e_x,e_y = int((dx - ox) * speed),int((dy- oy) * speed)
 
 
 
@@ -175,3 +156,4 @@ while True:
         data = f"{e_x},{e_y}\n"
         ser.write(data.encode('utf-8'))
 
+        time.sleep(0.001)

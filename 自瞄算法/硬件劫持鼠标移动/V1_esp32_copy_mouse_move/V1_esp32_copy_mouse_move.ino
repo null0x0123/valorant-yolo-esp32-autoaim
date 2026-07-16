@@ -17,7 +17,6 @@ void loop() {
     //检查是否有数据
     if (Serial.available() > 0) {
 
-        //
         String data = Serial.readStringUntil('\n');
         data.trim();
         int comma = data.indexOf(',');
@@ -32,6 +31,8 @@ void loop() {
 
             // 执行鼠标相对移动
             Mouse.move(ex, ey);
+
+
         }
     }
     delay(1);

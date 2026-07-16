@@ -6,22 +6,24 @@ USBHIDMouse Mouse;
 
 //CH9350L帧解析
 
-#define CH9350_SERIAL  Serial2
+#define CH9350_SERIAL  Serial2   // CH9350 接 ESP32-S3 Serial2 (RX=GPIO17, TX 不接)
 
 // 帧头
 #define CH_HEAD1  0x57
 #define CH_HEAD2  0xAB
 
 // 帧类型标识
-#define CH_TYPE_HID_1     0x88
+#define CH_TYPE_HID_1     0x88   // HID 输入帧: 57 AB 88 0B + 11字节 + 1校验
 #define CH_TYPE_HID_2     0x0B
 
-#define CH_HID_DATA_LEN   11
+#define CH_HID_DATA_LEN   11      // HID 数据帧有效载荷长度
 
-#define MOUSE_BTN_OFFSET   2
-#define MOUSE_X_OFFSET     3
-#define MOUSE_Y_OFFSET     5
-#define MOUSE_WHEEL_OFFSET 7
+// 11 字节数据中各字段偏移
+// 典型布局: [端点][类型][按键][X低][X高][Y低][Y高][滚轮][保留]...
+#define MOUSE_BTN_OFFSET   2      // 按键字节（bit0=左键, bit1=右键, bit2=中键）
+#define MOUSE_X_OFFSET     3      // X 位移起始（16 位有符号，小端序）
+#define MOUSE_Y_OFFSET     5      // Y 位移起始（16 位有符号，小端序）
+#define MOUSE_WHEEL_OFFSET 7      // 滚轮（8 位有符号）
 
 // 帧解析状态机
 enum Ch9350State {
@@ -37,9 +39,7 @@ uint8_t ch_hid[CH_HID_DATA_LEN];
 uint8_t ch_hid_idx = 0;
 uint8_t ch_type1 = 0, ch_type2 = 0;
 
-
-
-//返回 true 表示收到完整一帧 HID 数据
+// 逐字节喂入，返回 true 表示收到完整一帧 HID 数据
 bool ch9350_feed(uint8_t b) {
     switch (ch_state) {
         case WAIT_HEAD1:
@@ -74,9 +74,8 @@ bool ch9350_feed(uint8_t b) {
     return false;
 }
 
-
-
 //初始化
+
 void setup() {
     Serial.begin(115200);                              // Python 通信串口
     delay(100);
@@ -90,15 +89,15 @@ void setup() {
 }
 
 //主循环
-//位移倍率：原始数据*倍率，补偿CH9350L低速USB导致的 DPI 下降
-//1.5 = 1.5 倍灵敏度，2.0 = 2 倍，1.0 = 原始。根据手感微调
+// ★ 位移倍率：原始数据 × 倍率 → 补偿 CH9350L 低速 USB 导致的 DPI 下降
+//    1.5 = 1.5 倍灵敏度，2.0 = 2 倍，1.0 = 原始。根据手感微调
 #define MOUSE_SENSITIVITY 2.0f
 
 void loop() {
-    //倍率放大后超 ±127 的部分分片发送，不丢数据
+    // ★ carry 赊账：倍率放大后超 ±127 的部分分片发送，不丢数据
     static int32_t carry_dx = 0, carry_dy = 0, carry_wheel = 0;
 
-    //只取一帧，USB HID 单report队列排空多帧只会丢帧
+    // 只取一帧（不排空），USB HID 单 report 队列排空多帧只会丢帧
     bool got_frame = false;
     int16_t mouse_dx = 0, mouse_dy = 0;
     int8_t  mouse_wheel = 0;
@@ -116,7 +115,7 @@ void loop() {
     }
 
     if (got_frame) {
-        //按键响应
+        // 按键直接响应（不延迟）
         if (mouse_btn & 0x01) Mouse.press(MOUSE_LEFT);
         else                  Mouse.release(MOUSE_LEFT);
         if (mouse_btn & 0x02) Mouse.press(MOUSE_RIGHT);
@@ -124,13 +123,13 @@ void loop() {
         if (mouse_btn & 0x04) Mouse.press(MOUSE_MIDDLE);
         else                  Mouse.release(MOUSE_MIDDLE);
 
-        //乘倍率后累加，发送PC位移=物理位移*MOUSE_SENSITIVITY
+        // ★ 乘倍率后累加 → 发送到 PC 的位移 = 物理位移 × MOUSE_SENSITIVITY
         carry_dx    += (int32_t)(mouse_dx    * MOUSE_SENSITIVITY);
         carry_dy    += (int32_t)(mouse_dy    * MOUSE_SENSITIVITY);
         carry_wheel += (int32_t)(mouse_wheel * MOUSE_SENSITIVITY);
     }
 
-    //每轮发一帧USBHID，剩余暂存carry
+    // 每轮发一帧 USB HID（最多 ±127），剩余暂存 carry 下轮继续
     int8_t sx = constrain(carry_dx,    -128, 127);
     int8_t sy = constrain(carry_dy,    -128, 127);
     int8_t sw = constrain(carry_wheel, -128, 127);
@@ -145,7 +144,7 @@ void loop() {
         carry_wheel -= sw;
     }
 
-    //Python 自瞄数据
+    //Python 自瞄数据（不变）
     if (Serial.available() > 0) {
         String data = Serial.readStringUntil('\n');
         data.trim();

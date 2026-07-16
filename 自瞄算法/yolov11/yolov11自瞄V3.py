@@ -1,9 +1,12 @@
-#V2pro模板
-#模型训练含头部与身体
+#V2模板
+#优化了自转算法(由硬件自己执行自转)，可手动开关
+#配合arduino端V2代码使用
 import serial
 import time
 import dxcam
 from ultralytics import YOLO
+import threading
+import keyboard
 
 
 
@@ -11,9 +14,9 @@ from ultralytics import YOLO
 
 
 ############                    定位速度speed                           ############
-speed = 2
-############                    预测强度predict                         ############
-predict = 0
+speed = 2.2
+############                    屏幕大小                                ############
+size_x,size_y = 2560,1440
 ############                    矩形自瞄范围 x * y                      ############
 area_x,area_y = 320,320
 ############                    模型置信度                              ############
@@ -22,11 +25,9 @@ conf = 0.75
 classes_list = [1]
 ############                    模型选择                                ############
 model = r"D:\code\python\ultralytics-main\perfect.engine"
-############                    锁歪了可以自定义参数                     ############
-############                    左右调整(正值向右)                       ############
-move_X = 0
-############                    上下调整(正值向上)                       ############
-move_Y = 0
+############                    一键自转                                ############
+spin_open_key = b'h'
+spin_close_key = b'j'
 
 
 
@@ -34,20 +35,22 @@ move_Y = 0
 #初始化
 
 #屏幕中心坐标
-ox,oy = 1280,720
+ox,oy = size_x // 2,size_y // 2
 
 #模型初始化
 yolo = YOLO(model = model,task = "detect")
 
-#旧目标坐标初始化
-last_x,last_y = 0,0
+#自转开关初始化
+self_spin = False
+
+#自转确认开关初始化
+if_sure_stop_spin = False
 
 #截图范围初始化
 left = ox - area_x // 2
 right = ox + area_x // 2
 top = oy - area_y // 2
 down = oy + area_y // 2
-
 
 #自瞄矩形框大小x1,y1,x2,y2
 region = (left,top,right,down)
@@ -59,8 +62,6 @@ cam.start()
 # #帧率工具初始化
 # FPS = 0
 # last_time = time.time()
-
-
 
 #串口波特率初始化
 BAUDRATE = 115200
@@ -74,6 +75,26 @@ ser = serial.Serial(PORT, BAUDRATE, timeout=0.01)
 #等板子复位
 time.sleep(2)
 
+#监听按键线程
+def listen_key():
+    def open():
+        global self_spin
+
+        self_spin = True
+    def close():
+        global self_spin
+        global if_sure_stop_spin
+
+        self_spin = False
+        if_sure_stop_spin = True
+    keyboard.add_hotkey('h',open)
+    keyboard.add_hotkey('j',close)
+    keyboard.wait()
+
+
+
+threading.Thread(target=listen_key, daemon=True).start()
+
 
 
 while True:
@@ -83,6 +104,7 @@ while True:
 
     #空帧拦截防止崩溃
     if frame_BGR is None:
+        time.sleep(0.001)
         continue
 
 
@@ -101,6 +123,7 @@ while True:
 
     #该图里面的所有框
     boxes = res.boxes
+
 
 
     #如果检测到目标：
@@ -149,29 +172,42 @@ while True:
 
         
 
-        #  **预测逻辑**
-        #计算预测位置
-        #两帧的位移
-        vel_x,vel_y = dx - last_x,dy - last_y
-        #预测的坐标
-        pred_x,pred_y = dx + vel_x * predict,dy + vel_y * predict
-
-        #刷新旧目标位置
-        last_x,last_y = dx,dy
-
-        
-
         #计算相对位移
-        
-        e_x,e_y = int((pred_x + (move_X) - ox) * speed),int((pred_y - (move_Y) - oy) * speed)
+        if self_spin == True:
+            e_x,e_y = 666,666
+            data = f"{e_x},{e_y}\n"
+            ser.write(data.encode('utf-8'))
 
+        elif if_sure_stop_spin == True:
+            e_x,e_y = 555,555
+            data = f"{e_x},{e_y}\n"
+            ser.write(data.encode('utf-8'))
+            if_sure_stop_spin = False
 
+        else:
+            e_x,e_y = int((dx - ox) * speed),int((dy - oy) * speed)
 
-        # 限幅防止 HID 鼠标溢出（-127~127）
-        e_x = max(-127, min(127, e_x))
-        e_y = max(-127, min(127, e_y))
+            # 限幅防止 HID 鼠标溢出（-127~127）
+            e_x = max(-127, min(127, e_x))
+            e_y = max(-127, min(127, e_y))
 
-        # 发送命令移动鼠标
-        data = f"{e_x},{e_y}\n"
-        ser.write(data.encode('utf-8'))
+            # 发送命令移动鼠标
+            data = f"{e_x},{e_y}\n"
+            ser.write(data.encode('utf-8'))
 
+        time.sleep(0.001)
+    
+
+    else:
+        if self_spin == True:
+            e_x,e_y = 666,666
+            data = f"{e_x},{e_y}\n"
+            ser.write(data.encode('utf-8'))
+
+        if if_sure_stop_spin == True:
+            e_x,e_y = 555,555
+            data = f"{e_x},{e_y}\n"
+            ser.write(data.encode('utf-8'))
+            if_sure_stop_spin = False
+            
+        time.sleep(0.001)
